@@ -1,0 +1,33 @@
+[package]
+name = "rainmill-reporting"
+version = "0.1.0"
+description = "Dashboards and reports for Laterite: data sources answer one query shape, and indicators, charts, tables and breakdowns draw from any of them over a chosen period"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/rainmill/reporting-plugin"
+publish = false
+
+# Marks this crate as a Laterite plugin and names the module it registers, so a
+# tool can tell what it is without building it. Which Laterite it supports is
+# stated by the dependency requirement below, never repeated here.
+[package.metadata.laterite]
+plugin = "rainmill.reporting"
+
+[dependencies]
+# Laterite crates are version-only so this manifest is location-independent
+# (identical whether dev-symlinked under an app's plugins/ tree or vendored).
+laterite-core = "0.11"
+# The dashboard widgets, the screens and the charts.
+laterite-admin = "0.11"
+# Calendar arithmetic for periods and groups.
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+serde = { version = "1", features = ["derive"] }
+# Dashboard definitions, at the framework's version.
+serde-saphyr = "1.3"
+# The cache key: a digest of the query.
+sha2 = "0.10"
+thiserror = "1"
+
+[dev-dependencies]
+laterite-core = { version = "0.11", features = ["sqlite", "postgres", "testing"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
