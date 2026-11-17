@@ -54,14 +54,20 @@ a.rp-figure:hover .rp-figure__value{color:var(--accent)}
 .rp-notice[data-tone="warning"]{background:var(--warning-subtle,var(--surface-sunken));color:var(--warning,var(--text-body))}
 .rp-notice[data-tone="danger"]{background:var(--danger-subtle);color:var(--danger-700,var(--danger))}
 
-.rp-grid{display:grid;grid-template-columns:repeat(20,minmax(0,1fr));gap:16px;align-items:start}
-.rp-widget{grid-column:span var(--span,20);min-width:0;padding:var(--card-pad);border:1px solid var(--border-default);border-radius:var(--radius-card);background:var(--surface-raised)}
+.rp-grid{--rp-packed:1;display:grid;grid-template-columns:repeat(20,minmax(0,1fr));grid-auto-rows:8px;grid-auto-flow:row dense;column-gap:16px;row-gap:0;align-items:start}
+.rp-widget{grid-column:var(--start,auto)/span var(--span,20);margin-bottom:16px;min-width:0;padding:var(--card-pad);border:1px solid var(--border-default);border-radius:var(--radius-card);background:var(--surface-raised)}
 .rp-widget--bare{padding:8px 0 0;border:0;background:none}
 .rp-widget__title{margin:0 0 12px;font-family:var(--font-display);font-size:var(--fs-16);font-weight:var(--fw-semibold)}
-@media (max-width:1100px){.rp-widget{grid-column:span max(10,var(--span,20))}}
+@media (max-width:1100px){.rp-grid{--rp-packed:0;grid-auto-rows:auto;grid-auto-flow:row}.rp-widget{grid-column:span max(10,var(--span,20))}}
 @media (max-width:700px){.rp-grid{grid-template-columns:minmax(0,1fr)}.rp-widget{grid-column:1/-1}}
 
 .rp-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px}
 .rp-card{display:flex;align-items:center;gap:12px;padding:var(--card-pad);border:1px solid var(--border-default);border-radius:var(--radius-card);background:var(--surface-raised);color:var(--text-heading);text-decoration:none}
 .rp-card:hover{border-color:var(--accent);background:var(--accent-quiet)}
-.rp-failures{display:grid;gap:8px;margin:0 0 16px}
+.rp-pending{border-radius:8px;background:linear-gradient(90deg,var(--surface-sunken,rgba(0,0,0,.05)) 25%,rgba(0,0,0,.02) 50%,var(--surface-sunken,rgba(0,0,0,.05)) 75%);background-size:200% 100%;animation:rp-wait 1.4s ease-in-out infinite}
+.rp-pending--figure{height:72px}
+.rp-pending--table{height:160px}
+.rp-pending--chart{height:250px}
+.rp-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+@keyframes rp-wait{0%{background-position:200% 0}100%{background-position:-200% 0}}
+@media (prefers-reduced-motion:reduce){.rp-pending{animation:none}}

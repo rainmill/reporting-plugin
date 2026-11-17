@@ -427,19 +427,34 @@ fn period_bar(shell: &Shell, view: &View) -> String {
 }
 
 /// Renders a dashboard's widgets over `view` for the signed-in operator.
-pub async fn render(ctx: &RouteCtx, shell: &Shell, definition: &Definition, view: &View) -> Markup {
+/// The dashboard's page: the period bar and every widget's frame, drawn at
+/// once. A widget with a data source is a placeholder that fetches itself
+/// from `widget_url` (see [`render_widget`]) once the page is up, so a slow
+/// source delays its own widgets alone.
+pub fn render(
+    ctx: &RouteCtx,
+    shell: &Shell,
+    definition: &Definition,
+    view: &View,
+    widget_url: &str,
+) -> Markup {
     let sources: Vec<&DataSourceReg> = ctx.contributions::<DataSourceReg>();
-    let cx = ReportCx {
-        db: ctx.db(),
-        crypt: ctx.crypt(),
-        cache: ctx.cache(),
-    };
     let mut body = String::from(r#"<div class="rp-grid">"#);
-    // A source that fails says why once, above the widgets.
-    let mut failures: Vec<String> = Vec::new();
+    let query = format!(
+        "{}{}",
+        view.query_string(view.compare),
+        if view.fresh { "&refresh=1" } else { "" }
+    );
     for row in definition.rows() {
+        // The column a widget starts at: after the widgets before it in its row.
+        let mut column = 1;
         for (code, spec) in row {
-            let width = spec.width.unwrap_or(COLUMNS).min(COLUMNS);
+            let width = spec.width.unwrap_or(COLUMNS).clamp(1, COLUMNS);
+            if column + width - 1 > COLUMNS {
+                column = 1;
+            }
+            let start = column;
+            column += width;
             let source = spec.data_source.as_deref().map(|code| {
                 sources
                     .iter()
@@ -447,20 +462,22 @@ pub async fn render(ctx: &RouteCtx, shell: &Shell, definition: &Definition, view
                     .map(|r| r.source.as_ref())
             });
             let inner = match source {
-                Some(None) => draw::failed(&shell.t("This widget's data source is not installed.")),
+                Some(None) => draw::failed(&shell.t("This widget's data source is not installed."))
+                    .into_string(),
                 Some(Some(s)) if s.permission().is_some_and(|p| !shell.allows(p)) => continue,
-                Some(Some(s)) => match widget(shell, &cx, s, spec, view).await {
-                    Ok(m) => m,
-                    Err(ReportError::Source(reason)) => {
-                        let line = format!("{}: {reason}", shell.tt(&s.label()));
-                        if !failures.contains(&line) {
-                            failures.push(line);
-                        }
-                        draw::unavailable(&shell.t("Not available."))
-                    }
-                    Err(e) => draw::failed(&e.to_string()),
-                },
-                None => static_widget(spec, view),
+                Some(Some(_)) => format!(
+                    r#"<div class="rp-pending rp-pending--{kind}" hx-get="{url}/{code}{query}" hx-trigger="load" hx-swap="outerHTML" aria-busy="true"><span class="rp-sr">{loading}</span></div>"#,
+                    kind = match spec.kind {
+                        Kind::Indicator => "figure",
+                        Kind::Table => "table",
+                        _ => "chart",
+                    },
+                    url = escape(widget_url),
+                    code = escape(code),
+                    query = escape(&query),
+                    loading = escape(&shell.t("Loading")),
+                ),
+                None => static_widget(spec, view).into_string(),
             };
             let title = match (spec.kind, &spec.title) {
                 (Kind::Section | Kind::Indicator, _) | (_, None) => String::new(),
@@ -472,22 +489,52 @@ pub async fn render(ctx: &RouteCtx, shell: &Shell, definition: &Definition, view
                 "rp-widget"
             };
             body.push_str(&format!(
-                r#"<section class="{frame}" id="report-{}" style="--span:{width}">{title}{inner}</section>"#,
+                r#"<section class="{frame}" id="report-{}" style="--span:{width};--start:{start}">{title}{inner}</section>"#,
                 escape(code)
             ));
         }
     }
     body.push_str("</div>");
-    let banner: String = failures
+    Markup::raw_unchecked(format!("{}{body}", period_bar(shell, view)))
+}
+
+/// One widget's content, fetched after the page: its data drawn, or what
+/// went wrong in its place. `None` when the dashboard has no such widget or
+/// the operator may not read its source.
+pub async fn render_widget(
+    ctx: &RouteCtx,
+    shell: &Shell,
+    definition: &Definition,
+    code: &str,
+    view: &View,
+) -> Option<Markup> {
+    let rows = definition.rows();
+    let spec = rows
         .iter()
-        .map(|f| draw::notice(f, "danger").into_string())
-        .collect();
-    let banner = if banner.is_empty() {
-        banner
-    } else {
-        format!(r#"<div class="rp-failures">{banner}</div>"#)
+        .flatten()
+        .find(|(c, _)| c.as_str() == code)
+        .map(|(_, spec)| spec)?;
+    let wanted = spec.data_source.as_deref()?;
+    let sources: Vec<&DataSourceReg> = ctx.contributions::<DataSourceReg>();
+    let source = sources
+        .iter()
+        .find(|r| r.source.code() == wanted)
+        .map(|r| r.source.as_ref())?;
+    if source.permission().is_some_and(|p| !shell.allows(p)) {
+        return None;
+    }
+    let cx = ReportCx {
+        db: ctx.db(),
+        crypt: ctx.crypt(),
+        cache: ctx.cache(),
     };
-    Markup::raw_unchecked(format!("{}{banner}{body}", period_bar(shell, view)))
+    Some(match widget(shell, &cx, source, spec, view).await {
+        Ok(m) => m,
+        Err(ReportError::Source(reason)) => {
+            draw::unavailable(&format!("{}: {reason}", shell.tt(&source.label())))
+        }
+        Err(e) => draw::failed(&e.to_string()),
+    })
 }
 
 fn static_widget(spec: &WidgetSpec, view: &View) -> Markup {

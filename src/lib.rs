@@ -32,6 +32,8 @@ use laterite_core::{Module, ModuleId, Registry};
 
 /// The widgets' stylesheet, as an admin asset key.
 pub const CSS: &str = "rainmill/reporting.css";
+/// The script that packs a dashboard's widgets.
+pub const JS: &str = "rainmill/reporting.js";
 /// The permission to open report dashboards.
 pub const VIEW: &str = "rainmill.reporting.view";
 /// The permission to build and share report dashboards.
@@ -59,6 +61,7 @@ impl Module for ReportingModule {
             CSS,
             AdminAsset::css(include_bytes!("../assets/reporting.css")),
         );
+        registry.add_asset(JS, AdminAsset::js(include_bytes!("../assets/reporting.js")));
         admin::register(registry);
     }
 }

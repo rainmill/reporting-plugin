@@ -10,3 +10,4 @@ bump is breaking and a patch is additive.
 ### Added
 
 - First cut. Report dashboards for Laterite: a data source contract with periods, comparison and caching, indicators, line, bar, horizontal bar, doughnut, pie, percentage and table widgets, YAML dashboards on a 20-column grid, and a data source over any table.
+- A dashboard opens at once and each widget loads its own data, so a slow source delays its own widgets alone; widgets pack under the one above in their columns.

@@ -44,7 +44,7 @@ struct Reports;
 
 impl Screen for Reports {
     fn mount(&self, ctx: &RouteCtx) -> Router {
-        let (list_cx, show_cx) = (ctx.clone(), ctx.clone());
+        let (list_cx, show_cx, widget_cx) = (ctx.clone(), ctx.clone(), ctx.clone());
         Router::new()
             .route(
                 "/",
@@ -52,6 +52,17 @@ impl Screen for Reports {
                     let ctx = list_cx.clone();
                     async move { list(&ctx, &shell) }
                 }),
+            )
+            .route(
+                "/{code}/widgets/{widget}",
+                get(
+                    move |Path((code, widget)): Path<(String, String)>,
+                          Query(query): Query<HashMap<String, String>>,
+                          Extension(shell): Extension<Shell>| {
+                        let ctx = widget_cx.clone();
+                        async move { one(&ctx, &shell, &code, &widget, &query).await }
+                    },
+                ),
             )
             .route(
                 "/{code}",
@@ -122,13 +133,43 @@ async fn show(
         }
     };
     let view = View::from_query(query, dashboard::today());
-    let body = dashboard::render(ctx, shell, &definition, &view).await;
+    let widgets = format!("{}/{}/widgets", ctx.base_path(), reg.code);
+    let body = dashboard::render(ctx, shell, &definition, &view, &widgets);
     let mut assets: Vec<&'static str> = CHART_ASSETS.to_vec();
     assets.push(CSS);
+    assets.push(crate::JS);
     shell.page_with(
         PageHead::new(reg.name.clone())
             .back(t!("Reports"), ctx.base_path().to_string())
             .assets(&assets),
         body,
     )
+}
+
+/// One widget of a dashboard, as the page fetches it after opening.
+async fn one(
+    ctx: &RouteCtx,
+    shell: &Shell,
+    code: &str,
+    widget: &str,
+    query: &HashMap<String, String>,
+) -> Response {
+    let Some(reg) = visible(ctx, shell).into_iter().find(|d| d.code == code) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let Ok(definition) = Definition::parse(reg.yaml) else {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    };
+    let view = View::from_query(query, dashboard::today());
+    match dashboard::render_widget(ctx, shell, &definition, widget, &view).await {
+        Some(markup) => (
+            [(
+                laterite_admin::axum::http::header::CACHE_CONTROL,
+                "private, no-store",
+            )],
+            laterite_admin::axum::response::Html(markup.into_string()),
+        )
+            .into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
 }

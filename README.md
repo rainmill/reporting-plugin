@@ -129,7 +129,9 @@ impl DataSource for Visits {
 }
 ```
 
-A source that fails with `ReportError::Source` is named once above the dashboard, and its widgets read "Not available"; the rest of the dashboard renders.
+The page opens with every widget's frame, and each widget with a data source then fetches itself from `/reports/<dashboard>/widgets/<widget>`. A source that fails with `ReportError::Source` shows its reason inside its own widgets; the rest of the dashboard draws.
+
+A widget sits directly under the one above it in its columns, whatever the heights beside it.
 
 ## License
 
