@@ -436,16 +436,19 @@ pub fn render(
     shell: &Shell,
     definition: &Definition,
     view: &View,
-    widget_url: &str,
+    page: &Page<'_>,
 ) -> Markup {
+    let widget_url = page.widgets;
     let sources: Vec<&DataSourceReg> = ctx.contributions::<DataSourceReg>();
     let mut body = String::from(r#"<div class="rp-grid">"#);
+    let mut row_index = 0;
     let query = format!(
         "{}{}",
         view.query_string(view.compare),
         if view.fresh { "&refresh=1" } else { "" }
     );
     for row in definition.rows() {
+        row_index += 1;
         // The column a widget starts at: after the widgets before it in its row.
         let mut column = 1;
         for (code, spec) in row {
@@ -489,13 +492,57 @@ pub fn render(
                 "rp-widget"
             };
             body.push_str(&format!(
-                r#"<section class="{frame}" id="report-{}" style="--span:{width};--start:{start}">{title}{inner}</section>"#,
-                escape(code)
+                r#"<section class="{frame}" id="report-{code}" data-rp-code="{code}" data-rp-row="{row_index}" data-rp-width="{width}" style="--span:{width};--start:{start}">{title}{inner}</section>"#,
+                code = escape(code)
             ));
         }
     }
     body.push_str("</div>");
-    Markup::raw_unchecked(format!("{}{body}", period_bar(shell, view)))
+    Markup::raw_unchecked(format!(
+        "{}{}{body}",
+        period_bar(shell, view),
+        edit_bar(shell, page)
+    ))
+}
+
+/// Where a dashboard's page sends its requests, and what its viewer may do.
+pub struct Page<'a> {
+    /// The address each widget is fetched under.
+    pub widgets: &'a str,
+    /// Where an arrangement is saved.
+    pub layout: &'a str,
+    /// Whether the viewer may arrange the dashboard.
+    pub editable: bool,
+    /// Whether the viewer sees an arrangement of their own.
+    pub personal: bool,
+}
+
+/// The controls that arrange a dashboard: Edit, then Apply, Cancel, Make
+/// default and Reset while editing. The script in `reporting.js` fills the
+/// form and shows the second set.
+fn edit_bar(shell: &Shell, page: &Page<'_>) -> String {
+    if !page.editable {
+        return String::new();
+    }
+    let t = |text: &str| escape(&shell.t(text));
+    format!(
+        r#"<form class="rp-editbar" method="post" action="{action}" data-rp-editbar><input type="hidden" name="_csrf" value="{csrf}"><input type="hidden" name="layout" value=""><input type="hidden" name="scope" value="mine"><button class="lat-btn lat-btn--ghost lat-btn--sm" type="button" data-rp-edit>{edit}</button><span class="rp-editbar__editing" hidden><span class="lat-muted">{hint}</span><button class="lat-btn lat-btn--primary lat-btn--sm" type="submit" data-rp-scope="mine">{apply}</button><button class="lat-btn lat-btn--ghost lat-btn--sm" type="button" data-rp-cancel>{cancel}</button><button class="lat-btn lat-btn--ghost lat-btn--sm" type="submit" data-rp-scope="default">{default}</button>{reset}</span></form>"#,
+        action = escape(page.layout),
+        csrf = escape(shell.csrf_token()),
+        edit = t("Edit dashboard"),
+        hint = t("Drag a widget to move it, drag its right edge to resize it."),
+        apply = t("Apply"),
+        cancel = t("Cancel"),
+        default = t("Apply for everyone"),
+        reset = if page.personal {
+            format!(
+                r#"<button class="lat-btn lat-btn--ghost lat-btn--sm" type="submit" data-rp-scope="reset">{}</button>"#,
+                t("Reset to the shared layout")
+            )
+        } else {
+            String::new()
+        },
+    )
 }
 
 /// One widget's content, fetched after the page: its data drawn, or what

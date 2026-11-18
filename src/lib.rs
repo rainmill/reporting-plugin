@@ -14,6 +14,8 @@ mod admin;
 pub mod dashboard;
 pub mod draw;
 mod engine;
+pub mod layout;
+mod migrations;
 pub mod period;
 mod source;
 mod table;
@@ -28,7 +30,7 @@ pub use source::{
 pub use table::TableSource;
 
 use laterite_admin::{AdminAsset, AdminRegistry};
-use laterite_core::{Module, ModuleId, Registry};
+use laterite_core::{MigrationSet, Module, ModuleId, Registry};
 
 /// The widgets' stylesheet, as an admin asset key.
 pub const CSS: &str = "rainmill/reporting.css";
@@ -54,6 +56,10 @@ pub struct ReportingModule;
 impl Module for ReportingModule {
     fn id(&self) -> ModuleId {
         ModuleId::new(MODULE_ID)
+    }
+
+    fn migrations(&self) -> MigrationSet {
+        migrations::migrations()
     }
 
     fn register(&self, registry: &mut Registry) {

@@ -112,6 +112,22 @@ reports:
 
 The period bar offers today, 7, 30 and 90 days, this month, last month, this quarter, this year and a custom range, with a comparison against the previous period or the same period last year. Refresh asks every source again.
 
+## Arrange a dashboard
+
+**Edit dashboard** (permission `rainmill.reporting.manage`) turns the page into its editor:
+
+| Action | How |
+| --- | --- |
+| Move a widget | Drag it onto another widget, to its left or right half; onto the strip at the bottom for a new row |
+| Resize | Drag its right edge; it snaps to the 20 columns, from 3 to what its row has free |
+| Remove | The button at its top right, shown on hover |
+| Apply | Saves the layout as your own |
+| Apply for everyone | Saves it as the layout everyone without their own sees |
+| Reset to the shared layout | Drops your own |
+| Cancel | Leaves the page as it was |
+
+A widget moves into a row only when its width fits there. A widget a plugin adds to the dashboard later appears after the arranged ones.
+
 ## A source of your own
 
 ```rust
