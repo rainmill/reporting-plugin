@@ -42,6 +42,7 @@ a.rp-figure:hover .rp-figure__value{color:var(--accent)}
 
 .rp-table .rp-num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
 .rp-table .rp-key{max-width:28rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media (max-width:700px){.rp-table .rp-key{max-width:9rem}.rp-table th,.rp-table td{padding-left:10px;padding-right:10px}}
 .rp-table tfoot td{font-weight:var(--fw-semibold);border-top:1px solid var(--border-strong)}
 .rp-cell__bar{display:block;height:4px;margin-top:4px;margin-left:auto;width:100%;max-width:120px;border-radius:2px;background:var(--surface-sunken);overflow:hidden}
 .rp-cell__bar i{display:block;height:100%;margin-left:auto}

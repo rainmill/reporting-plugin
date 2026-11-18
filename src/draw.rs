@@ -290,7 +290,12 @@ pub fn axis(
             } else {
                 ""
             };
-            format!("<span>{}</span>", escape(text))
+            let alt = if (p / every) % 2 == 1 {
+                r#" class="is-alt""#
+            } else {
+                ""
+            };
+            format!("<span{alt}>{}</span>", escape(text))
         })
         .collect();
     let empty = if tallest <= 0.0 {
