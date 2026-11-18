@@ -14,12 +14,13 @@ mod admin;
 pub mod dashboard;
 pub mod draw;
 mod engine;
-pub mod layout;
+pub mod kinds;
 mod migrations;
 pub mod period;
 mod source;
 mod table;
 
+pub use admin::board_of;
 pub use dashboard::DashboardReg;
 pub use engine::{run, Report};
 pub use period::{Compare, Group, Preset};
@@ -34,8 +35,6 @@ use laterite_core::{MigrationSet, Module, ModuleId, Registry};
 
 /// The widgets' stylesheet, as an admin asset key.
 pub const CSS: &str = "rainmill/reporting.css";
-/// The script that packs a dashboard's widgets.
-pub const JS: &str = "rainmill/reporting.js";
 /// The permission to open report dashboards.
 pub const VIEW: &str = "rainmill.reporting.view";
 /// The permission to build and share report dashboards.
@@ -67,7 +66,6 @@ impl Module for ReportingModule {
             CSS,
             AdminAsset::css(include_bytes!("../assets/reporting.css")),
         );
-        registry.add_asset(JS, AdminAsset::js(include_bytes!("../assets/reporting.js")));
         admin::register(registry);
     }
 }

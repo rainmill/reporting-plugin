@@ -5,7 +5,6 @@ use std::collections::HashMap;
 
 use chrono::{NaiveDate, Utc};
 use laterite_admin::html::Markup;
-use laterite_admin::routes::RouteCtx;
 use laterite_admin::Shell;
 use laterite_core::Text;
 use serde::Deserialize;
@@ -13,8 +12,8 @@ use serde::Deserialize;
 use crate::draw::{self, escape, Axis, Figure, Ring, Shown};
 use crate::period::{Compare, Group, Preset};
 use crate::{
-    run, DataSource, DataSourceReg, Filter, FilterOp, Order, OrderBy, Report, ReportCx,
-    ReportError, ReportQuery, Unit,
+    run, DataSource, Filter, FilterOp, Order, OrderBy, Report, ReportCx, ReportError, ReportQuery,
+    Unit,
 };
 
 /// The grid's columns.
@@ -67,6 +66,9 @@ pub struct Definition {
     /// The widgets, by code, placed by their `row` and in written order.
     #[serde(default)]
     pub reports: Vec<(String, WidgetSpec)>,
+    /// Each widget as written, by code, for the settings a board keeps.
+    #[serde(skip)]
+    pub written: Vec<(String, laterite_core::serde_json::Value)>,
 }
 
 impl Definition {
@@ -80,13 +82,14 @@ impl Definition {
         }
         let file: File = serde_saphyr::from_str(yaml).map_err(|e| e.to_string())?;
         let mut reports = Vec::new();
+        let mut written = Vec::new();
         for (code, value) in file.reports {
-            let spec: WidgetSpec = laterite_core::serde_json::from_value(value)
+            let spec = WidgetSpec::from_json(value.clone())
                 .map_err(|e| format!("report `{code}`: {e}"))?;
-            spec.check().map_err(|e| format!("report `{code}`: {e}"))?;
-            reports.push((code, spec));
+            reports.push((code.clone(), spec));
+            written.push((code, value));
         }
-        Ok(Self { reports })
+        Ok(Self { reports, written })
     }
 
     /// The widgets in rows, rows in order.
@@ -258,6 +261,14 @@ pub struct WidgetSpec {
 }
 
 impl WidgetSpec {
+    /// A widget from its JSON form, refused when it lacks what its type needs.
+    pub fn from_json(value: laterite_core::serde_json::Value) -> Result<Self, String> {
+        let spec: WidgetSpec =
+            laterite_core::serde_json::from_value(value).map_err(|e| e.to_string())?;
+        spec.check()?;
+        Ok(spec)
+    }
+
     fn check(&self) -> Result<(), String> {
         let needs_source = !matches!(self.kind, Kind::Section | Kind::Notice);
         if needs_source && self.data_source.is_none() {
@@ -369,7 +380,7 @@ impl View {
 
 /// The bar above a dashboard: presets, a custom range, the comparison and
 /// Refresh.
-fn period_bar(shell: &Shell, view: &View) -> String {
+pub(crate) fn period_bar(shell: &Shell, view: &View) -> String {
     let presets: String = Preset::ALL
         .iter()
         .map(|(_, code)| {
@@ -426,165 +437,7 @@ fn period_bar(shell: &Shell, view: &View) -> String {
     )
 }
 
-/// Renders a dashboard's widgets over `view` for the signed-in operator.
-/// The dashboard's page: the period bar and every widget's frame, drawn at
-/// once. A widget with a data source is a placeholder that fetches itself
-/// from `widget_url` (see [`render_widget`]) once the page is up, so a slow
-/// source delays its own widgets alone.
-pub fn render(
-    ctx: &RouteCtx,
-    shell: &Shell,
-    definition: &Definition,
-    view: &View,
-    page: &Page<'_>,
-) -> Markup {
-    let widget_url = page.widgets;
-    let sources: Vec<&DataSourceReg> = ctx.contributions::<DataSourceReg>();
-    let mut body = String::from(r#"<div class="rp-grid">"#);
-    let mut row_index = 0;
-    let query = format!(
-        "{}{}",
-        view.query_string(view.compare),
-        if view.fresh { "&refresh=1" } else { "" }
-    );
-    for row in definition.rows() {
-        row_index += 1;
-        // The column a widget starts at: after the widgets before it in its row.
-        let mut column = 1;
-        for (code, spec) in row {
-            let width = spec.width.unwrap_or(COLUMNS).clamp(1, COLUMNS);
-            if column + width - 1 > COLUMNS {
-                column = 1;
-            }
-            let start = column;
-            column += width;
-            let source = spec.data_source.as_deref().map(|code| {
-                sources
-                    .iter()
-                    .find(|r| r.source.code() == code)
-                    .map(|r| r.source.as_ref())
-            });
-            let inner = match source {
-                Some(None) => draw::failed(&shell.t("This widget's data source is not installed."))
-                    .into_string(),
-                Some(Some(s)) if s.permission().is_some_and(|p| !shell.allows(p)) => continue,
-                Some(Some(_)) => format!(
-                    r#"<div class="rp-pending rp-pending--{kind}" hx-get="{url}/{code}{query}" hx-trigger="load" hx-swap="outerHTML" aria-busy="true"><span class="rp-sr">{loading}</span></div>"#,
-                    kind = match spec.kind {
-                        Kind::Indicator => "figure",
-                        Kind::Table => "table",
-                        _ => "chart",
-                    },
-                    url = escape(widget_url),
-                    code = escape(code),
-                    query = escape(&query),
-                    loading = escape(&shell.t("Loading")),
-                ),
-                None => static_widget(spec, view).into_string(),
-            };
-            let title = match (spec.kind, &spec.title) {
-                (Kind::Section | Kind::Indicator, _) | (_, None) => String::new(),
-                (_, Some(t)) => format!(r#"<h3 class="rp-widget__title">{}</h3>"#, escape(t)),
-            };
-            let frame = if spec.kind == Kind::Section {
-                "rp-widget rp-widget--bare"
-            } else {
-                "rp-widget"
-            };
-            body.push_str(&format!(
-                r#"<section class="{frame}" id="report-{code}" data-rp-code="{code}" data-rp-row="{row_index}" data-rp-width="{width}" style="--span:{width};--start:{start}">{title}{inner}</section>"#,
-                code = escape(code)
-            ));
-        }
-    }
-    body.push_str("</div>");
-    Markup::raw_unchecked(format!(
-        "{}{}{body}",
-        period_bar(shell, view),
-        edit_bar(shell, page)
-    ))
-}
-
-/// Where a dashboard's page sends its requests, and what its viewer may do.
-pub struct Page<'a> {
-    /// The address each widget is fetched under.
-    pub widgets: &'a str,
-    /// Where an arrangement is saved.
-    pub layout: &'a str,
-    /// Whether the viewer may arrange the dashboard.
-    pub editable: bool,
-    /// Whether the viewer sees an arrangement of their own.
-    pub personal: bool,
-}
-
-/// The controls that arrange a dashboard: Edit, then Apply, Cancel, Make
-/// default and Reset while editing. The script in `reporting.js` fills the
-/// form and shows the second set.
-fn edit_bar(shell: &Shell, page: &Page<'_>) -> String {
-    if !page.editable {
-        return String::new();
-    }
-    let t = |text: &str| escape(&shell.t(text));
-    format!(
-        r#"<form class="rp-editbar" method="post" action="{action}" data-rp-editbar><input type="hidden" name="_csrf" value="{csrf}"><input type="hidden" name="layout" value=""><input type="hidden" name="scope" value="mine"><button class="lat-btn lat-btn--ghost lat-btn--sm" type="button" data-rp-edit>{edit}</button><span class="rp-editbar__editing" hidden><span class="lat-muted">{hint}</span><button class="lat-btn lat-btn--primary lat-btn--sm" type="submit" data-rp-scope="mine">{apply}</button><button class="lat-btn lat-btn--ghost lat-btn--sm" type="button" data-rp-cancel>{cancel}</button><button class="lat-btn lat-btn--ghost lat-btn--sm" type="submit" data-rp-scope="default">{default}</button>{reset}</span></form>"#,
-        action = escape(page.layout),
-        csrf = escape(shell.csrf_token()),
-        edit = t("Edit dashboard"),
-        hint = t("Drag a widget to move it, drag its right edge to resize it."),
-        apply = t("Apply"),
-        cancel = t("Cancel"),
-        default = t("Apply for everyone"),
-        reset = if page.personal {
-            format!(
-                r#"<button class="lat-btn lat-btn--ghost lat-btn--sm" type="submit" data-rp-scope="reset">{}</button>"#,
-                t("Reset to the shared layout")
-            )
-        } else {
-            String::new()
-        },
-    )
-}
-
-/// One widget's content, fetched after the page: its data drawn, or what
-/// went wrong in its place. `None` when the dashboard has no such widget or
-/// the operator may not read its source.
-pub async fn render_widget(
-    ctx: &RouteCtx,
-    shell: &Shell,
-    definition: &Definition,
-    code: &str,
-    view: &View,
-) -> Option<Markup> {
-    let rows = definition.rows();
-    let spec = rows
-        .iter()
-        .flatten()
-        .find(|(c, _)| c.as_str() == code)
-        .map(|(_, spec)| spec)?;
-    let wanted = spec.data_source.as_deref()?;
-    let sources: Vec<&DataSourceReg> = ctx.contributions::<DataSourceReg>();
-    let source = sources
-        .iter()
-        .find(|r| r.source.code() == wanted)
-        .map(|r| r.source.as_ref())?;
-    if source.permission().is_some_and(|p| !shell.allows(p)) {
-        return None;
-    }
-    let cx = ReportCx {
-        db: ctx.db(),
-        crypt: ctx.crypt(),
-        cache: ctx.cache(),
-    };
-    Some(match widget(shell, &cx, source, spec, view).await {
-        Ok(m) => m,
-        Err(ReportError::Source(reason)) => {
-            draw::unavailable(&format!("{}: {reason}", shell.tt(&source.label())))
-        }
-        Err(e) => draw::failed(&e.to_string()),
-    })
-}
-
-fn static_widget(spec: &WidgetSpec, view: &View) -> Markup {
+pub(crate) fn static_widget(spec: &WidgetSpec, view: &View) -> Markup {
     match spec.kind {
         Kind::Section => draw::section(
             spec.title.as_deref().unwrap_or_default(),
@@ -644,7 +497,7 @@ pub fn query_of(spec: &WidgetSpec, view: &View) -> ReportQuery {
     q
 }
 
-async fn widget(
+pub(crate) async fn widget(
     shell: &Shell,
     cx: &ReportCx<'_>,
     source: &dyn DataSource,

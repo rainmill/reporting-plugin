@@ -114,19 +114,18 @@ The period bar offers today, 7, 30 and 90 days, this month, last month, this qua
 
 ## Arrange a dashboard
 
-**Edit dashboard** (permission `rainmill.reporting.manage`) turns the page into its editor:
+A dashboard is a Laterite board of report widgets. With `rainmill.reporting.manage`, **Edit dashboard** moves, resizes, adds, removes and configures them, saved as one's own layout or for everyone.
 
-| Action | How |
+| Kind | Draws |
 | --- | --- |
-| Move a widget | Drag it onto another widget, to its left or right half; onto the strip at the bottom for a new row |
-| Resize | Drag its right edge; it snaps to the 20 columns, from 3 to what its row has free |
-| Remove | The button at its top right, shown on hover |
-| Apply | Saves the layout as your own |
-| Apply for everyone | Saves it as the layout everyone without their own sees |
-| Reset to the shared layout | Drops your own |
-| Cancel | Leaves the page as it was |
+| `rainmill.reporting.indicator` | One figure, its change and a goal |
+| `rainmill.reporting.chart` | Line, bar, stacked bar, horizontal bar, doughnut or pie |
+| `rainmill.reporting.table` | Rows by a dimension, with totals and in-cell bars |
+| `rainmill.reporting.percentage` | Each value's share |
+| `rainmill.reporting.section` | A heading |
+| `rainmill.reporting.notice` | A line of text |
 
-A widget moves into a row only when its width fits there. A widget a plugin adds to the dashboard later appears after the arranged ones.
+Another board offers them with `Board::offer(["rainmill.reporting.*"])`; `rainmill_reporting::board_of(&reg)` is the board a declared dashboard starts as.
 
 ## A source of your own
 
@@ -145,9 +144,7 @@ impl DataSource for Visits {
 }
 ```
 
-The page opens with every widget's frame, and each widget with a data source then fetches itself from `/reports/<dashboard>/widgets/<widget>`. A source that fails with `ReportError::Source` shows its reason inside its own widgets; the rest of the dashboard draws.
-
-A widget sits directly under the one above it in its columns, whatever the heights beside it.
+A source that fails with `ReportError::Source` shows its reason inside its own widgets; the rest of the dashboard draws.
 
 ## License
 

@@ -351,134 +351,63 @@ mod table {
     }
 }
 
-mod layouts {
-    use laterite_core::testing::connect_test;
-    use rainmill_reporting::dashboard::Definition;
-    use rainmill_reporting::layout::{self, Layout, Placed, EVERYONE};
+mod kinds {
+    use laterite_core::serde_json::json;
+    use rainmill_reporting::dashboard::{Definition, Kind};
+    use rainmill_reporting::kinds::{settings_of, spec_of};
 
-    const YAML: &str = r#"
-reports:
-  head: { row: 1, type: section, title: Sales }
-  orders: { row: 2, width: 5, type: indicator, metric: orders, data_source: acme.orders }
-  revenue: { row: 2, width: 5, type: indicator, metric: revenue, data_source: acme.orders }
-  trend: { row: 3, type: chart, chart: line, data_source: acme.orders, metrics: [orders] }
-"#;
-
-    fn codes(d: &Definition) -> Vec<Vec<(String, u8)>> {
-        d.rows()
-            .into_iter()
-            .map(|r| {
-                r.into_iter()
-                    .map(|(c, s)| (c.clone(), s.width.unwrap_or(20)))
-                    .collect()
-            })
-            .collect()
+    #[test]
+    fn a_written_widget_becomes_flat_settings_and_back() {
+        let written = json!({
+            "row": 2, "width": 10, "type": "table", "title": "Cities", "data_source": "acme.orders",
+            "dimension": "city", "limit": 10, "hide_empty": true,
+            "metrics": [{ "metric": "orders", "bar": true, "totals": true, "colour": "#c44e2f" }, "revenue"],
+            "filters": [{ "op": "equals", "value": "paid" }],
+        });
+        let settings = settings_of(&written);
+        assert_eq!(settings["metrics"], json!(["orders", "revenue"]));
+        assert_eq!(settings["colours"], "#c44e2f, ");
+        assert_eq!(
+            (settings["totals"].clone(), settings["bars"].clone()),
+            (json!(true), json!(true))
+        );
+        assert_eq!(settings["limit"], "10");
+        assert!(settings.get("row").is_none() && settings.get("width").is_none());
+        let spec = spec_of(Kind::Table, &settings).unwrap();
+        assert_eq!(
+            (spec.title.as_deref(), spec.limit, spec.hide_empty),
+            (Some("Cities"), Some(10), true)
+        );
+        assert_eq!(spec.metrics.len(), 2);
+        assert_eq!(spec.filters.len(), 1);
     }
 
     #[test]
-    fn an_arrangement_is_kept_to_what_the_dashboard_has() {
-        let definition = Definition::parse(YAML).unwrap();
-        let sent = r#"{"rows":[[{"code":"trend","width":12},{"code":"orders","width":1},{"code":"ghost","width":5}],
-            [{"code":"trend","width":20}],[{"code":"revenue","width":15},{"code":"head","width":20}]],"hidden":["orders","nope"]}"#;
-        let layout = Layout::checked(sent, &definition).unwrap();
+    fn settings_from_a_form_are_read_leniently() {
+        // As the Configure form sends them: text for numbers and switches.
+        let form = json!({ "title": "Orders", "data_source": "acme.orders", "metric": "orders",
+            "goal": "500", "lower_is_better": "1", "icon": "", "link": "" });
+        let spec = spec_of(Kind::Indicator, &form).unwrap();
         assert_eq!(
-            layout.rows,
-            vec![
-                vec![
-                    Placed {
-                        code: "trend".into(),
-                        width: 12
-                    },
-                    Placed {
-                        code: "orders".into(),
-                        width: 3
-                    }
-                ],
-                vec![Placed {
-                    code: "revenue".into(),
-                    width: 15
-                }],
-                vec![Placed {
-                    code: "head".into(),
-                    width: 20
-                }],
-            ],
-            "unknown and repeated widgets go, a width stays in bounds, an overfull row splits"
+            (spec.goal, spec.lower_is_better, spec.icon),
+            (Some(500.0), true, None)
         );
-        assert!(layout.hidden.is_empty(), "a placed widget is not hidden");
-        assert!(Layout::checked("not json", &definition).is_err());
+        // A chart with no figures is refused, as its YAML would be.
+        assert!(spec_of(Kind::Chart, &json!({ "data_source": "acme.orders" })).is_err());
+        assert!(spec_of(
+            Kind::Chart,
+            &json!({ "data_source": "acme.orders", "metrics": ["orders"], "filters": "nope" })
+        )
+        .is_err());
     }
 
     #[test]
-    fn an_arrangement_moves_resizes_and_hides_and_keeps_newer_widgets() {
-        let definition = Definition::parse(YAML).unwrap();
-        let layout = Layout {
-            rows: vec![vec![
-                Placed {
-                    code: "trend".into(),
-                    width: 14,
-                },
-                Placed {
-                    code: "orders".into(),
-                    width: 6,
-                },
-            ]],
-            hidden: vec!["head".into()],
-        };
-        assert_eq!(
-            codes(&definition.arranged(&layout)),
-            vec![
-                vec![("trend".to_string(), 14), ("orders".to_string(), 6)],
-                vec![("revenue".to_string(), 5)],
-            ],
-            "revenue, which the arrangement does not mention, follows in its own row"
-        );
-    }
-
-    #[tokio::test]
-    async fn a_person_sees_their_own_arrangement_then_the_shared_one() {
-        let (db, _guard) = connect_test(&[rainmill_reporting::module().migrations()]).await;
-        let now = "2026-11-18T10:00:00Z";
-        let one = |code: &str| Layout {
-            rows: vec![vec![Placed {
-                code: code.into(),
-                width: 20,
-            }]],
-            hidden: vec![],
-        };
-        assert_eq!(
-            layout::of(&db, "acme.sales", 7).await.unwrap(),
-            (None, false)
-        );
-        layout::save(&db, "acme.sales", EVERYONE, &one("trend"), now)
-            .await
-            .unwrap();
-        assert_eq!(
-            layout::of(&db, "acme.sales", 7).await.unwrap(),
-            (Some(one("trend")), false)
-        );
-        layout::save(&db, "acme.sales", 7, &one("orders"), now)
-            .await
-            .unwrap();
-        layout::save(&db, "acme.sales", 7, &one("revenue"), now)
-            .await
-            .unwrap();
-        assert_eq!(
-            layout::of(&db, "acme.sales", 7).await.unwrap(),
-            (Some(one("revenue")), true)
-        );
-        assert_eq!(
-            layout::of(&db, "acme.sales", 8).await.unwrap(),
-            (Some(one("trend")), false)
-        );
-        assert_eq!(
-            layout::of(&db, "acme.other", 7).await.unwrap(),
-            (None, false)
-        );
-        layout::forget(&db, "acme.sales", 7).await.unwrap();
-        assert_eq!(
-            layout::of(&db, "acme.sales", 7).await.unwrap(),
-            (Some(one("trend")), false)
-        );
+    fn a_declared_dashboard_keeps_each_widget_as_written() {
+        let definition = Definition::parse(
+            "reports:\n  head: { row: 1, type: section, title: Sales }\n  orders: { row: 2, width: 5, type: indicator, metric: orders, data_source: acme.orders }\n",
+        )
+        .unwrap();
+        assert_eq!(definition.written.len(), 2);
+        assert_eq!(settings_of(&definition.written[1].1)["metric"], "orders");
     }
 }
