@@ -30,4 +30,5 @@ thiserror = "1"
 
 [dev-dependencies]
 laterite-core = { version = "0.11", features = ["sqlite", "postgres", "testing"] }
+laterite-auth = "0.11"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

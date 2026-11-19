@@ -411,3 +411,166 @@ mod kinds {
         assert_eq!(settings_of(&definition.written[1].1)["metric"], "orders");
     }
 }
+
+const TRAFFIC: &str = r##"
+reports:
+  views:
+    row: 1
+    width: 5
+    type: indicator
+    metric: views
+    data_source: test.stand
+  traffic:
+    row: 1
+    width: 15
+    type: chart
+    chart: line
+    data_source: test.stand
+    metrics: [views]
+"##;
+
+/// A dashboard read the way a caller with no page reads it: the period and
+/// each widget's settings as controls, and a chart's points for the days
+/// asked.
+#[tokio::test]
+async fn a_dashboard_is_described_and_a_chart_read_over_a_period() {
+    use std::sync::Arc;
+
+    use laterite_admin::routes::RouteCtx;
+    use laterite_auth::{AuthenticatedUser, BackendUser, PermissionSet};
+    use laterite_core::serde_json::json;
+    use laterite_core::{Module, Registry};
+    use rainmill_reporting::{board_of, DashboardReg, DataSourceReg, ReportingModule};
+
+    let (db, _guard) = connect_test(&laterite_admin::builtin_migrations()).await;
+    let mut registry = Registry::new();
+    registry.set_owner(ReportingModule.id());
+    ReportingModule.register(&mut registry);
+    registry.add(DataSourceReg::new(Arc::new(stand(None))));
+    let ctx = RouteCtx::builder(db)
+        .contributions(Arc::new(registry))
+        .build();
+    let reg = DashboardReg::new("acme.traffic", t!("Traffic"), TRAFFIC);
+    let board = Arc::new(board_of(&reg).unwrap());
+    ctx.add_surface(board.surface("/reports/acme.traffic", t!("Traffic")));
+
+    let now = chrono::Utc::now();
+    let user = AuthenticatedUser {
+        user: BackendUser {
+            id: 1,
+            username: "asha".to_string(),
+            email: "asha@acme.test".to_string(),
+            first_name: "Asha".to_string(),
+            last_name: None,
+            password_hash: String::new(),
+            is_superuser: false,
+            is_active: true,
+            timezone: None,
+            locale: None,
+            created_at: now,
+            updated_at: now,
+        },
+        permissions: PermissionSet::new(false, Vec::<String>::new()),
+    };
+    let abilities = ctx.abilities();
+
+    let described = abilities
+        .run(
+            &user,
+            "backend.screens.describe",
+            json!({ "screen": "/reports/acme.traffic" }),
+            None,
+        )
+        .await
+        .unwrap()
+        .data
+        .unwrap();
+    let period: Vec<&str> = described["controls"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(period, ["range", "from", "to", "compare", "refresh"]);
+    assert_eq!(described["controls"][1]["kind"], "date");
+    let chart = described["parts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["name"] == "traffic")
+        .unwrap();
+    assert_eq!(chart["acts"], json!(["read"]));
+    let named = |name: &str| {
+        chart["controls"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["name"] == name)
+            .unwrap_or_else(|| panic!("no control `{name}`: {chart}"))
+    };
+    // The settings that depend on the chosen source are there, with its own
+    // figures to choose from.
+    assert_eq!(named("data_source")["value"], "test.stand");
+    assert!(named("dimension")["values"]
+        .as_array()
+        .unwrap()
+        .contains(&json!("page")));
+    assert_eq!(named("from")["kind"], "date");
+
+    let read = abilities
+        .run(
+            &user,
+            "backend.screens.act",
+            json!({
+                "screen": "/reports/acme.traffic",
+                "part": "traffic",
+                "act": "read",
+                "set": { "from": "2026-11-01", "to": "2026-11-07" }
+            }),
+            None,
+        )
+        .await
+        .unwrap()
+        .data
+        .unwrap();
+    assert_eq!(read["from"], "2026-11-01");
+    assert_eq!(read["to"], "2026-11-07");
+    assert_eq!(read["metrics"], json!(["views"]));
+    let rows = read["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), 7, "{read}");
+    assert_eq!(rows[0]["key"], "2026-11-01");
+    assert_eq!(rows[2]["values"], json!([3.0]));
+
+    // The same widget broken down another way, with nothing saved.
+    let by_page = abilities
+        .run(
+            &user,
+            "backend.screens.act",
+            json!({
+                "screen": "/reports/acme.traffic",
+                "part": "traffic",
+                "act": "read",
+                "set": { "dimension": "page", "range": "7d" }
+            }),
+            None,
+        )
+        .await
+        .unwrap()
+        .data
+        .unwrap();
+    assert_eq!(by_page["rows"][0]["key"], "/");
+
+    let shown = abilities
+        .run(
+            &user,
+            "backend.screens.act",
+            json!({ "screen": "/reports/acme.traffic", "act": "show", "set": { "range": "30d" } }),
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        shown.go.as_deref(),
+        Some("/admin/reports/acme.traffic?range=30d")
+    );
+}

@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use laterite_admin::ability::{AbilityCx, AbilityError, Outcome};
 use laterite_admin::axum::extract::Query;
 use laterite_admin::axum::http::StatusCode;
 use laterite_admin::axum::response::{IntoResponse, Response};
@@ -13,8 +14,9 @@ use laterite_admin::board::{Board, BoardCx, Layout, Placement, COLUMNS};
 use laterite_admin::chart::CHART_ASSETS;
 use laterite_admin::html::Markup;
 use laterite_admin::routes::{RouteCtx, Screen, ScreenReg};
+use laterite_admin::surface::{Control, Part, Request, Surface};
 use laterite_admin::{AdminRegistry, AuthenticatedUser, PageHead, Permission, Shell};
-use laterite_core::{t, Registry};
+use laterite_core::{t, Registry, Text};
 
 use crate::dashboard::{self, DashboardReg, Definition, View};
 use crate::draw::escape;
@@ -80,11 +82,74 @@ pub fn board_of(reg: &DashboardReg) -> Result<Board, String> {
     .edit_permission(MANAGE)
     .share_permission(MANAGE)
     .offer([format!("{}.*", kinds::PREFIX)])
-    .carry(["range", "from", "to", "compare", "refresh"]);
+    .carry(["range", "from", "to", "compare", "refresh"])
+    .explain(
+        Control::new("range", t!("Period"), "select")
+            .describe(t!(
+                "A named period, counted from today. Leave out when giving from and to."
+            ))
+            .values(crate::Preset::ALL.iter().map(|(_, code)| *code)),
+    )
+    .explain(
+        Control::new("from", t!("From"), "date")
+            .describe(t!("The first day, as YYYY-MM-DD. Give it with to.")),
+    )
+    .explain(Control::new("to", t!("To"), "date").describe(t!("The last day, as YYYY-MM-DD.")))
+    .explain(
+        Control::new("compare", t!("Compare with"), "select")
+            .describe(t!("The period an indicator is compared with."))
+            .values(["previous", "year"]),
+    )
+    .explain(
+        Control::new("refresh", t!("Fresh figures"), "boolean")
+            .describe(t!("1 reads past what was kept from an earlier answer."))
+            .values(["1"]),
+    );
     if let Some(permission) = reg.permission {
         board = board.view_permission(permission);
     }
     Ok(board)
+}
+
+/// A dashboard's surface behind the screen's own permission and the
+/// dashboard's, as its page is.
+struct Guarded {
+    inner: Arc<dyn Surface>,
+    also: Option<&'static str>,
+}
+
+impl Guarded {
+    fn open_to(&self, cx: &AbilityCx<'_>) -> Result<(), AbilityError> {
+        if self.also.is_none_or(|p| cx.user().permissions.allows(p)) {
+            Ok(())
+        } else {
+            Err(AbilityError::invalid("screen: no such screen"))
+        }
+    }
+}
+
+#[laterite_core::strata::async_trait]
+impl Surface for Guarded {
+    fn path(&self) -> &str {
+        self.inner.path()
+    }
+    fn label(&self) -> Text {
+        self.inner.label()
+    }
+    fn describe(&self) -> Option<Text> {
+        Some(t!("A report dashboard: figures over a period."))
+    }
+    fn permission(&self) -> Option<&str> {
+        Some(VIEW)
+    }
+    async fn parts(&self, cx: &AbilityCx<'_>) -> Result<Part, AbilityError> {
+        self.open_to(cx)?;
+        self.inner.parts(cx).await
+    }
+    async fn act(&self, cx: &AbilityCx<'_>, request: &Request) -> Result<Outcome, AbilityError> {
+        self.open_to(cx)?;
+        self.inner.act(cx, request).await
+    }
 }
 
 struct Reports;
@@ -107,6 +172,16 @@ impl Screen for Reports {
                     continue;
                 }
             };
+            // The dashboard says what it has: its period and each widget.
+            let path = format!("{}/{}", ctx.base_path(), reg.code);
+            let path = path
+                .strip_prefix(ctx.admin_path())
+                .unwrap_or(&path)
+                .to_string();
+            ctx.add_surface(Arc::new(Guarded {
+                inner: board.surface(path, reg.name.clone()),
+                also: reg.permission,
+            }));
             let base = format!("{}/{}/board", ctx.base_path(), reg.code);
             let (page, page_ctx, code) = (board.clone(), ctx.clone(), reg.code);
             router = router

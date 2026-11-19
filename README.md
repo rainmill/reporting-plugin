@@ -127,6 +127,29 @@ A dashboard is a Laterite board of report widgets. With `rainmill.reporting.mana
 
 Another board offers them with `Board::offer(["rainmill.reporting.*"])`; `rainmill_reporting::board_of(&reg)` is the board a declared dashboard starts as.
 
+## Read a dashboard from code
+
+Each dashboard is a Laterite surface at its page's path, behind the same
+permissions as the page.
+
+```rust
+let read = ctx.abilities().run(&user, "backend.screens.act", json!({
+    "screen": "/rainmill/reporting/acme.traffic",
+    "part": "traffic",
+    "act": "read",
+    "set": { "from": "2026-11-01", "to": "2026-11-15", "dimension": "page" }
+}), None).await?;
+```
+
+Part | Controls | Acts
+--- | --- | ---
+the dashboard | `range`, `from`, `to`, `compare`, `refresh` | `show`
+an indicator, chart, table or breakdown, by its key | its settings and the period | `read`
+
+`read` answers `source`, `from`, `to`, `dimension`, `metrics`, `labels`,
+`rows` (a `key` and a value per metric), `totals` and, for an indicator
+compared with another period, `previous`.
+
 ## A source of your own
 
 ```rust
