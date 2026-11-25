@@ -16,9 +16,9 @@ plugin = "rainmill.reporting"
 [dependencies]
 # Laterite crates are version-only so this manifest is location-independent
 # (identical whether dev-symlinked under an app's plugins/ tree or vendored).
-laterite-core = "0.11"
+laterite-core = "0.12"
 # The dashboard widgets, the screens and the charts.
-laterite-admin = "0.11"
+laterite-admin = "0.12"
 # Calendar arithmetic for periods and groups.
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 serde = { version = "1", features = ["derive"] }
@@ -29,6 +29,6 @@ sha2 = "0.10"
 thiserror = "1"
 
 [dev-dependencies]
-laterite-core = { version = "0.11", features = ["sqlite", "postgres", "testing"] }
-laterite-auth = "0.11"
+laterite-core = { version = "0.12", features = ["sqlite", "postgres", "testing"] }
+laterite-auth = "0.12"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
